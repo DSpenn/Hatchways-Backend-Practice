@@ -2,6 +2,7 @@ const fs = require('fs');
 const express = require('express');
 
 const app = express();
+
 app.use(express.json());
 app.get('/', (req, res) => {
   res.send(
@@ -10,19 +11,38 @@ app.get('/', (req, res) => {
 });
 app.listen(3001, () => console.log('Express Server on port 3001!'));
 
-app.get('/recipes', (req, res) => {
-  fs.readFile('./db/recipes.json', 'utf8', (err, data) => {
-    if (err) {
-      console.error(err);
-    } else {
-      const parsedRecipes = JSON.parse(data);
-      console.log('parsedRecipes', parsedRecipes);
+var parsedRecipes = [];
 
-      const recipeNames = parsedRecipes.recipes.map((recipe) => recipe.name);
-      console.log('recipeNames', recipeNames);
-      return res.json(recipeNames);
-    }
-  });
+async function dbRead() {
+  try {
+    data = fs.readFileSync('./db/recipes.json');
+    parsedRecipes = JSON.parse(data);
+  } catch {
+    console.log(e);
+  }
+  return parsedRecipes
+}
+
+async function dbWrite(parsedRecipes) {
+  try {
+    fs.writeFile(
+      './db/recipes.json',
+      JSON.stringify(parsedRecipes, null, 4),
+      (writeErr) =>
+      writeErr ?
+      console.error(writeErr) :
+      console.info('Successfully updated!')
+    );
+  } catch {
+    console.log(e);
+  }
+}
+
+app.get('/recipes', (req, res) => {
+  dbRead();
+  const recipeNames = parsedRecipes.recipes.map((recipe) => recipe.name);
+  //console.log('recipeNames', recipeNames);
+  return res.json(recipeNames);
 });
 
 //http://localhost:3001/recipes/details/scrambledEggs
@@ -30,13 +50,12 @@ app.get('/recipes/details/:recipeName', (req, res) => {
   const requestedRecipe = req.params.recipeName.toLowerCase();
 
   if (requestedRecipe) {
-    let rawdata = fs.readFileSync('./db/recipes.json');
-    const recipes = JSON.parse(rawdata);
+    dbRead();
 
-    for (let i = 0; i < recipes.recipes.length; i++) {
-      if (requestedRecipe === recipes.recipes[i].name.toLowerCase()) {
-        recipes.recipes[i].numSteps = recipes.recipes[i].instructions.length;
-        return res.json(recipes.recipes[i]);
+    for (let i = 0; i < parsedRecipes.recipes.length; i++) {
+      if (requestedRecipe === parsedRecipes.recipes[i].name.toLowerCase()) {
+        parsedRecipes.recipes[i].numSteps = parsedRecipes.recipes[i].instructions.length;
+        return res.json(parsedRecipes.recipes[i]);
       }
     }
   }
@@ -44,15 +63,14 @@ app.get('/recipes/details/:recipeName', (req, res) => {
 });
 
 
-
 app.post('/recipes', (req, res) => {
   console.info(`${req.method} request received to add a recipe`);
-
   const {
     name,
     ingredients,
     instructions
   } = req.body;
+
   var found = false;
   if (name, ingredients, instructions) {
     const newRecipe = {
@@ -60,36 +78,68 @@ app.post('/recipes', (req, res) => {
       ingredients,
       instructions
     };
-    fs.readFile('./db/recipes.json', 'utf8', (err, data) => {
-      if (err) {
-        console.error(err);
-      } else {
-        const parsedRecipes = JSON.parse(data);
-        let requestedRecipe = name.toLowerCase();
-        if (requestedRecipe) {
-          for (let i = 0; i < parsedRecipes.recipes.length; i++) {
-            if (requestedRecipe === parsedRecipes.recipes[i].name.toLowerCase()) {
-              found = true;
-              let response = {
-                status: 'error',
-                body: 'Recipe already exists',
-              };
-              console.log(response);
-              res.json(response);
-            }
-          }
+    dbRead();
+
+    let requestedRecipe = name.toLowerCase();
+    if (requestedRecipe) {
+      for (let i = 0; i < parsedRecipes.recipes.length; i++) {
+        if (requestedRecipe === parsedRecipes.recipes[i].name.toLowerCase()) {
+          found = true;
+          let response = {
+            status: 'error',
+            body: 'Recipe already exists',
+          };
+          console.log(response);
+          res.json(response);
         }
-        if (!found) {
+      }
+    }
+    if (!found) {
+      parsedRecipes.recipes.push(newRecipe);
+
+      dbWrite(parsedRecipes);
+
+      let response = {
+        status: 'success',
+        body: newRecipe,
+      };
+
+      console.log(response);
+      res.json(response);
+    }
+
+  }
+});
+
+app.put('/recipes', (req, res) => {
+  console.info(`${req.method} request received`);
+  const {
+    name,
+    ingredients,
+    instructions
+  } = req.body;
+
+  var found = false;
+
+  if (name, ingredients, instructions) {
+    const newRecipe = {
+      name,
+      ingredients,
+      instructions
+    };
+
+    dbRead();
+
+    let requestedRecipe = name.toLowerCase();
+    if (requestedRecipe) {
+      for (let i = 0; i < parsedRecipes.recipes.length; i++) {
+        if (requestedRecipe === parsedRecipes.recipes[i].name.toLowerCase()) {
+          found = true;
+          parsedRecipes.recipes.splice(i);
           parsedRecipes.recipes.push(newRecipe);
 
-          fs.writeFile(
-            './db/recipes.json',
-            JSON.stringify(parsedRecipes, null, 4),
-            (writeErr) =>
-            writeErr ?
-            console.error(writeErr) :
-            console.info('Successfully updated!')
-          );
+          dbWrite(parsedRecipes);
+
           let response = {
             status: 'success',
             body: newRecipe,
@@ -98,74 +148,17 @@ app.post('/recipes', (req, res) => {
           console.log(response);
           res.json(response);
         }
-
       }
-    });
-  } else {
-    res.json('Error in posting');
-  }
-});
+    }
+    if (!found) {
+      let response = {
+        status: 'error',
+        body: 'Recipe does not exist"',
+      };
 
-
-app.put('/recipes', (req, res) => {
-
-  console.info(`${req.method} request received`);
-
-  const {
-    name,
-    ingredients,
-    instructions
-  } = req.body;
-  var found = false;
-  if (name, ingredients, instructions) {
-    const newRecipe = {
-      name,
-      ingredients,
-      instructions
-    };
-    fs.readFile('./db/recipes.json', 'utf8', (err, data) => {
-      if (err) {
-        console.error(err);
-      } else {
-        const parsedRecipes = JSON.parse(data);
-        let requestedRecipe = name.toLowerCase();
-        if (requestedRecipe) {
-          for (let i = 0; i < parsedRecipes.recipes.length; i++) {
-            if (requestedRecipe === parsedRecipes.recipes[i].name.toLowerCase()) {
-              found = true;
-              parsedRecipes.recipes.splice(i);
-              parsedRecipes.recipes.push(newRecipe);
-
-              fs.writeFile(
-                './db/recipes.json',
-                JSON.stringify(parsedRecipes, null, 4),
-                (writeErr) =>
-                writeErr ?
-                console.error(writeErr) :
-                console.info('Successfully updated!')
-              );
-              let response = {
-                status: 'success',
-                body: newRecipe,
-              };
-
-              console.log(response);
-              res.json(response);
-            }
-          }
-        }
-        if (!found) {
-          let response = {
-            status: 'error',
-            body: 'Recipe not found',
-          };
-
-          console.log(response);
-          res.json(response);
-        }
-
-      }
-    });
+      console.log(response);
+      res.json(response);
+    }
   } else {
     res.json('Error in posting');
   }
